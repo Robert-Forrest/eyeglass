@@ -210,8 +210,12 @@ def plot_binary(elements, model, originalData=None, x_features=["percentage"], y
             )
 
 
-def plot_ternary(elements, model, onlyPredictions=False,
-                 originalData=None, quaternary=None, additionalFeatures=[]):
+def plot_ternary(
+        elements, model,
+        originalData=None,
+        quaternary=None,
+        y_features=[]):
+
     if not os.path.exists(cb.conf.image_directory + "compositions"):
         os.makedirs(cb.conf.image_directory + "compositions")
 
@@ -225,25 +229,25 @@ def plot_ternary(elements, model, onlyPredictions=False,
 
     if not os.path.exists(ternary_dir):
         os.makedirs(ternary_dir)
-    if not os.path.exists(ternary_dir + '/predictions'):
-        os.makedirs(ternary_dir + '/predictions')
-    if not os.path.exists(ternary_dir + '/features'):
-        os.makedirs(ternary_dir + '/features')
-        
+
     compositions, percentages, all_features, GFA_predictions, realData, step = generate_ternary_compositions(
-        elements, model, originalData, quaternary=quaternary, additionalFeatures=additionalFeatures)
+        elements, model, originalData, quaternary=quaternary, y_features=y_features)
 
     for feature in all_features.columns:
-        trueFeatureName = feature.split(
-            '_linearmix')[0].split('_discrepancy')[0]
-        if onlyPredictions and feature not in cb.conf.target_names and trueFeatureName not in additionalFeatures:
-            continue
+
+        if len(y_features) > 0:
+            if feature not in y_features:
+                continue
 
         save_path = ""
         if feature in cb.conf.target_names:
             save_path += ternary_dir + "/predictions/" + feature
+            if not os.path.exists(ternary_dir + '/predictions'):
+                os.makedirs(ternary_dir + '/predictions')
         else:
             save_path += ternary_dir + "/features/" + feature
+            if not os.path.exists(ternary_dir + '/features'):
+                os.makedirs(ternary_dir + '/features')
 
         title = None
         if quaternary is not None:
@@ -251,42 +255,42 @@ def plot_ternary(elements, model, onlyPredictions=False,
                 round(100 - quaternary[1], 2)) + "}$" + quaternary[0] + "$_{" + str(
                     round(quaternary[1], 2)) + "}$"
 
-            
         if feature == 'GFA':
-            heatmap_data_crystal, heatmap_data_glass, heatmap_data_ribbon, heatmap_data_bmg, heatmap_data_argmax = generate_ternary_heatmap_data(
-                feature, GFA_predictions, percentages, step)
 
-            mg.plots.ternary_heatmap(heatmap_data_crystal, feature, elements,
-                            step, ternary_dir, realData=realData, quaternary=quaternary,
-                                     label="Crystal probability (%)", title=title, suffix="Crystal", vmin=0, vmax=1)
+            mg.plots.ternary_heatmap(compositions, [p[0] for p in GFA_predictions],
+                                     step, save_path=save_path+'_crystal',
+                                     label="Crystal probability (%)",
+                                     title=title, quaternary=quaternary, vmin=0, vmax=1)
 
-            mg.plots.ternary_heatmap(heatmap_data_glass, feature, elements,
-                            step, ternary_dir, realData=realData, quaternary=quaternary,
-                            label="Glass probability (%)",title=title,  suffix="Glass", vmin=0, vmax=1)
+            mg.plots.ternary_heatmap(compositions, [p[1] for p in GFA_predictions],
+                                     step, save_path=save_path+'_GR',
+                                     label="GR probability (%)",
+                                     title=title, quaternary=quaternary, vmin=0, vmax=1)
 
-            mg.plots.ternary_heatmap(heatmap_data_ribbon, feature, elements,
-                            step, ternary_dir, realData=realData, quaternary=quaternary,
-                            label="Ribbon probability (%)", title=title, suffix="Ribbon", vmin=0, vmax=1)
+            mg.plots.ternary_heatmap(compositions, [p[2] for p in GFA_predictions],
+                                     step, save_path=save_path+'_BMG',
+                                     label="BMG probability (%)",
+                                     title=title, quaternary=quaternary, vmin=0, vmax=1)
 
-            mg.plots.ternary_heatmap(heatmap_data_bmg, feature, elements,
-                            step, ternary_dir, realData=realData, quaternary=quaternary,
-                            label="BMG probability (%)", title=title, suffix="BMG", vmin=0, vmax=1)
+            mg.plots.ternary_heatmap(compositions, [p[1]+p[2] for p in GFA_predictions],
+                                     step, save_path=save_path+'_glass',
+                                     label="Glass probability (%)",
+                                     title=title, quaternary=quaternary, vmin=0, vmax=1)
 
-            mg.plots.ternary_heatmap(heatmap_data_argmax, feature, elements,
-                            step, ternary_dir, realData=realData, quaternary=quaternary,
-                            label="Predicted GFA Class", title=title, suffix="Classification", vmin=0, vmax=2)
+            mg.plots.ternary_heatmap(compositions, [np.argmax(p) for p in GFA_predictions],
+                                     step, save_path=save_path+'_argmax',
+                                     label="Predicted class",
+                                     title=title, quaternary=quaternary, vmin=0, vmax=2)
 
         else:
-            
+
             label = cb.features.prettyName(feature)
             if feature in cb.features.units:
                 label += " ("+cb.features.units[feature]+")"
-                
+
             mg.plots.ternary_heatmap(compositions, all_features[feature],
                                      step, save_path=save_path, label=label,
                                      title=title, quaternary=quaternary)
-
-
 
 
 def ternary_scatter(data, tax):
@@ -315,7 +319,7 @@ def ternary_scatter(data, tax):
 
 
 def generate_ternary_compositions(
-        elements, model, originalData, quaternary=None, minPercent=0, maxPercent=100, step=None, additionalFeatures=[]):
+        elements, model, originalData, quaternary=None, minPercent=0, maxPercent=1, step=None, y_features=[]):
     if step is None:
         step = 0.02 * (maxPercent - minPercent)
 
@@ -334,7 +338,7 @@ def generate_ternary_compositions(
             tmpComposition = []
             for e in elements:
                 if e in parsedComposition:
-                    tmpComposition.append(parsedComposition[e] * 100 / step)
+                    tmpComposition.append(100*(parsedComposition[e] / step))
                 else:
                     tmpComposition.append(0)
 
@@ -343,13 +347,13 @@ def generate_ternary_compositions(
     realData = pd.DataFrame(realData)
 
     compositions, percentages = mg.ternary.generate_alloys(
-        elements, step, minPercent, maxPercent, quaternary)
+        elements, step*100, minPercent*100, maxPercent*100, quaternary)
 
     all_features = pd.DataFrame(compositions, columns=['composition'])
     all_features = cb.features.calculate_features(all_features,
-                                               dropCorrelatedFeatures=False,
-                                               plot=False,
-                                               additionalFeatures=additionalFeatures)
+                                                  dropCorrelatedFeatures=False,
+                                                  plot=False,
+                                                  additionalFeatures=y_features)
     all_features = all_features.drop('composition', axis='columns')
     all_features = all_features.fillna(cb.features.maskValue)
 
@@ -366,34 +370,220 @@ def generate_ternary_compositions(
         else:
             all_features[cb.conf.targets[i].name] = predictions[i].flatten()
 
+    if quaternary is not None:
+        compositions, percentages = mg.ternary.generate_alloys(
+            elements, step*100, minPercent*100, maxPercent*100)
+
     return compositions, percentages, all_features, GFA_predictions, realData, step
 
 
-def generate_ternary_heatmap_data(feature, data, percentages, step):
+def plot_quaternary(elements, model, onlyPredictions=False, originalData=None, y_features=[]):
+    if not os.path.exists(cb.conf.image_directory + "compositions"):
+        os.makedirs(cb.conf.image_directory + "compositions")
 
-    if feature == 'GFA':
+    quaternary_dir = cb.conf.image_directory + "compositions/" + \
+        "_".join(elements)
 
-        heatmap_data_crystal = dict()
-        heatmap_data_ribbon = dict()
-        heatmap_data_bmg = dict()
-        heatmap_data_glass = dict()
-        heatmap_data_argmax = dict()
-        for i in range(len(data)):
-            heatmap_data_crystal[(percentages[i][0] / step,
-                                  percentages[i][1] / step)] = data[i][0]
-            heatmap_data_ribbon[(percentages[i][0] / step,
-                                 percentages[i][1] / step)] = data[i][1]
-            heatmap_data_bmg[(percentages[i][0] / step,
-                              percentages[i][1] / step)] = data[i][2]
-            heatmap_data_glass[(percentages[i][0] / step,
-                                percentages[i][1] / step)] = 1 - data[i][0]
-            heatmap_data_argmax[(percentages[i][0] / step,
-                                 percentages[i][1] / step)] = np.argmax(data[i])
+    if not os.path.exists(quaternary_dir):
+        os.makedirs(quaternary_dir)
 
-        return heatmap_data_crystal, heatmap_data_glass, heatmap_data_ribbon, heatmap_data_bmg, heatmap_data_argmax
-    else:
-        heatmap_data = dict()
-        for i, row in data.iterrows():
-            heatmap_data[(percentages[i][0] / step,
-                          percentages[i][1] / step)] = row[feature]
-        return heatmap_data
+    minPercent = 0
+    maxPercent = 100
+    numPercentages = 6
+    step = (maxPercent - minPercent) / float(numPercentages)
+    quaternary_percentages = [round(percentage, 3)
+                              for percentage in np.arange(minPercent, maxPercent, step)]
+
+    heatmaps = {}
+    compositions, percentages, all_features, GFA_predictions, realData, step = generate_ternary_compositions(
+        elements[:3], model, originalData, quaternary=[elements[3], quaternary_percentages[0]], y_features=y_features)
+    for feature in all_features.columns:
+        trueFeatureName = feature.split(
+            '_linearmix')[0].split('_discrepancy')[0]
+        if onlyPredictions and feature not in cb.conf.target_names and trueFeatureName not in y_features:
+            continue
+        if feature not in heatmaps:
+            if feature != 'GFA':
+                heatmaps[feature] = []
+            else:
+                heatmaps['GFA_crystal'] = []
+                heatmaps['GFA_glass'] = []
+                heatmaps['GFA_GR'] = []
+                heatmaps['GFA_BMG'] = []
+                heatmaps['GFA_argmax'] = []
+
+    realDatas = {}
+    quaternary_compositions = []
+    for percentage in quaternary_percentages:
+        compositions, percentages, all_features, GFA_predictions, realData, step = generate_ternary_compositions(
+            elements[:3], model, originalData, quaternary=[elements[3], percentage], y_features=y_features)
+
+        realDatas[percentage] = realData
+        quaternary_compositions.append(compositions)
+
+        doneGFA = False
+        for feature in heatmaps:
+            if "GFA_" in feature:
+                if not doneGFA:
+                    doneGFA = True
+
+                    heatmaps['GFA_crystal'].append(
+                        [p[0] for p in GFA_predictions])
+                    heatmaps['GFA_glass'].append(
+                        [p[1]+p[2] for p in GFA_predictions])
+                    heatmaps['GFA_GR'].append([p[1] for p in GFA_predictions])
+                    heatmaps['GFA_BMG'].append([p[1] for p in GFA_predictions])
+                    heatmaps['GFA_argmax'].append(
+                        [np.argmax(p) for p in GFA_predictions])
+            else:
+                heatmaps[feature].append(all_features[feature])
+
+    for feature in heatmaps:
+        if 'GFA_' not in feature:
+            vmax = -np.inf
+            vmin = np.inf
+            label = cb.features.prettyName(feature)
+            if feature in cb.features.units:
+                label += " (" + cb.features.units[feature] + ")"
+
+            tmpFeature = feature
+            suffix = None
+            for i in range(len(quaternary_percentages)):
+                for value in heatmaps[feature][i]:
+                    if value > vmax:
+                        vmax = value
+                    if value < vmin:
+                        vmin = value
+        else:
+            if feature != 'GFA_argmax':
+                vmax = 1
+                vmin = 0
+                GFA_type = feature.split('_')[1]
+                if GFA_type == 'BMG' or GFA_type == 'GR':
+                    GFA_type = GFA_type.upper()
+                else:
+                    GFA_type = GFA_type[0].upper() + GFA_type[1:]
+
+                label = GFA_type + " probability (%)"
+                suffix = feature.split('_')[1]
+                tmpFeature = "GFA"
+            else:
+                vmax = 2
+                vmin = 0
+                GFA_type = "GFA Classification"
+                label = GFA_type
+                suffix = feature.split('_')[1]
+                tmpFeature = "GFA"
+
+        for i in range(len(quaternary_percentages)):
+            ternary_dir = cb.conf.image_directory + "compositions/" + \
+                "_".join(elements) + "/" + \
+                elements[3] + str(quaternary_percentages[i])
+            if not os.path.exists(ternary_dir):
+                os.makedirs(ternary_dir)
+
+            save_path = ""
+            if feature in cb.conf.target_names:
+                save_path += ternary_dir + "/predictions/" + feature
+                if not os.path.exists(ternary_dir + '/predictions'):
+                    os.makedirs(ternary_dir + '/predictions')
+            else:
+                save_path += ternary_dir + "/features/" + feature
+                if not os.path.exists(ternary_dir + '/features'):
+                    os.makedirs(ternary_dir + '/features')
+
+            title = "(" + "".join(elements[:-1]) + ")$_{" + str(
+                round(100 - quaternary_percentages[i], 2)) + "}$" + elements[-1] + "$_{" + str(
+                    round(quaternary_percentages[i], 2)) + "}$"
+
+            scatter_data = []
+            if(len(realDatas[quaternary_percentages[i]]) > 0):
+                classes = ['Crystal', 'GR', 'BMG']
+                markers = ['s', 'D', 'o']
+                for c in range(len(classes)):
+                    scatter_data.append({
+                        'data': realDatas[quaternary_percentages[i]][realDatas[quaternary_percentages[i]]['GFA'] == c]['percentages'],
+                        'label': classes[c],
+                        'marker': markers[c]
+                    })
+
+            mg.plots.ternary_heatmap(quaternary_compositions[i], heatmaps[feature][i],
+                                     step, save_path=save_path,
+                                     scatter_data=scatter_data, title=title,
+                                     label=label, vmax=vmax, vmin=vmin)
+
+        columns = int(np.ceil(np.sqrt(len(quaternary_percentages))))
+        rows = int(np.ceil(len(quaternary_percentages) / columns))
+        numGridCells = columns*rows
+        gridExcess = numGridCells - len(quaternary_percentages)
+
+        fig = plt.figure(figsize=(4 * columns, 4 * rows))
+
+        lastAx = None
+        for i in reversed(range(len(quaternary_percentages))):
+            iRow = i // columns
+            iCol = i % columns
+
+            ax = plt.subplot2grid(
+                (rows, columns), (iRow, iCol))
+
+            if gridExcess != 0 and iRow == (rows-1):
+                if gridExcess % 2 == 0:
+                    ax = plt.subplot2grid(
+                        (rows, columns), (iRow, iCol+1))
+                else:
+                    ax = plt.subplot2grid(
+                        (rows, columns * 2), (iRow, 1+(iCol*2)), colspan=2)
+
+            if lastAx is None:
+                lastAx = ax
+
+            scatter_data = []
+            if(len(realDatas[quaternary_percentages[i]]) > 0):
+                classes = ['Crystal', 'GR', 'BMG']
+                markers = ['s', 'D', 'o']
+                for c in range(len(classes)):
+                    scatter_data.append({
+                        'data': realDatas[quaternary_percentages[i]][realDatas[quaternary_percentages[i]]['GFA'] == c]['percentages'],
+                        'label': classes[c],
+                        'marker': markers[c]
+                    })
+
+            title = "(" + "".join(elements[:-1]) + ")$_{" + str(
+                round(100 - quaternary_percentages[i], 2)) + "}$" + elements[-1] + "$_{" + str(
+                    round(quaternary_percentages[i], 2)) + "}$"
+
+            mg.plots.ternary_heatmap(quaternary_compositions[i], heatmaps[feature][i],
+                                     step, ax=ax, vmin=vmin, vmax=vmax,
+                                     scatter_data=scatter_data, title=title,
+                                     label=label, showColorbar=False)
+
+        jet_cmap = mpl.cm.get_cmap('jet')
+
+        cax = fig.add_axes([lastAx.get_position().x1 + 0.01,
+                            lastAx.get_position().y0 + 0.03,
+                            0.0075,
+                            lastAx.get_position().height])
+
+        colorbar = fig.colorbar(mpl.cm.ScalarMappable(
+            norm=mpl.colors.Normalize(vmin=vmin, vmax=vmax), cmap=jet_cmap),
+            cax=cax)
+        colorbar.set_label(label, labelpad=20, rotation=270)
+
+        if feature in cb.conf.target_names or "GFA_" in feature:
+            if not os.path.exists(quaternary_dir + '/predictions'):
+                os.makedirs(quaternary_dir + '/predictions')
+
+            fig.savefig(quaternary_dir + '/predictions/' +
+                        feature + ".png", bbox_inches='tight')
+
+        else:
+            if not os.path.exists(quaternary_dir + '/features'):
+                os.makedirs(quaternary_dir + '/features')
+
+            fig.savefig(quaternary_dir + '/features/' +
+                        feature + ".png", bbox_inches='tight')
+
+        plt.clf()
+        plt.cla()
+        plt.close()
