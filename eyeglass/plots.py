@@ -14,15 +14,24 @@ plt.style.use('ggplot')
 plt.rc('axes', axisbelow=True)
 
 
-def plot_binary(elements, model, originalData=None, x_features=["percentage"], y_Features=[]):
+def get_image_directory():
+    if cb.conf is not None:
+        return cb.conf.get("image_directory", "./")
+    else:
+        return "./"
 
-    if not os.path.exists(cb.conf.image_directory + "compositions"):
-        os.makedirs(cb.conf.image_directory + "compositions")
 
-    binary_dir = cb.conf.image_directory + \
+def plot_binary(elements, model, originalData=None, x_features=["percentage"], y_features=[], image_directory=get_image_directory()):
+
+    if not os.path.exists(image_directory + "compositions"):
+        os.makedirs(image_directory + "compositions")
+
+    binary_dir = image_directory + \
         "compositions/" + "_".join(elements)
     if not os.path.exists(binary_dir):
         os.makedirs(binary_dir)
+
+    targets = cb.models.get_model_prediction_features(model)
 
     realData = []
     requiredFeatures = []
@@ -43,29 +52,33 @@ def plot_binary(elements, model, originalData=None, x_features=["percentage"], y
         if feature not in requiredFeatures:
             requiredFeatures.append(feature)
 
-    compositions, percentages = mg.binary.generate_alloys(elements)
+    alloys, percentages = mg.generate.binary(elements)
 
-    all_features = pd.DataFrame(compositions, columns=['composition'])
+    all_features = pd.DataFrame([c.to_string()
+                                for c in alloys], columns=['composition'])
+
     all_features = cb.features.calculate_features(all_features,
                                                   dropCorrelatedFeatures=False,
                                                   plot=False,
                                                   requiredFeatures=requiredFeatures,
-                                                  additionalFeatures=y_features)
+                                                  additionalFeatures=y_features, model=model)
+
     all_features = all_features.drop('composition', axis='columns')
     all_features = all_features.fillna(cb.features.maskValue)
-    for feature in cb.conf.targets:
-        all_features[feature.name] = cb.features.maskValue
+    for feature in targets:
+        all_features[feature['name']] = cb.features.maskValue
     all_features['GFA'] = all_features['GFA'].astype('int64')
     all_features['percentage'] = percentages
+
     GFA_predictions = []
 
     prediction_ds = cb.features.df_to_dataset(all_features)
     predictions = model.predict(prediction_ds)
-    for i in range(len(cb.conf.targets)):
-        if cb.conf.targets[i].name == 'GFA':
+    for i in range(len(targets)):
+        if targets[i]['name'] == 'GFA':
             GFA_predictions = predictions[i]
         else:
-            all_features[cb.conf.targets[i].name] = predictions[i]
+            all_features[targets[i]['name']] = predictions[i]
 
     for inspect_feature in x_features:
         if inspect_feature not in all_features.columns:
@@ -189,7 +202,7 @@ def plot_binary(elements, model, originalData=None, x_features=["percentage"], y
                 ylabel = cb.features.prettyName(feature)
 
             save_path = ""
-            if feature in cb.conf.target_names:
+            if feature in [t['name'] for t in targets]:
                 save_path = binary_dir+'/'+inspect_feature + "/predictions/" + feature + ".png"
                 if not os.path.exists(binary_dir+'/'+inspect_feature + '/predictions'):
                     os.makedirs(binary_dir+'/' +
@@ -200,7 +213,7 @@ def plot_binary(elements, model, originalData=None, x_features=["percentage"], y
                     os.makedirs(binary_dir+'/'+inspect_feature + '/features')
 
             mg.plots.binary(
-                compositions,
+                alloys,
                 data,
                 scatter_data=scatter_data,
                 xlabel=xlabel,
@@ -214,24 +227,27 @@ def plot_ternary(
         elements, model,
         originalData=None,
         quaternary=None,
-        y_features=[]):
+        y_features=[],
+        image_directory=get_image_directory()):
 
-    if not os.path.exists(cb.conf.image_directory + "compositions"):
-        os.makedirs(cb.conf.image_directory + "compositions")
+    if not os.path.exists(image_directory + "compositions"):
+        os.makedirs(image_directory + "compositions")
 
     if quaternary is None:
-        ternary_dir = cb.conf.image_directory + \
+        ternary_dir = image_directory + \
             "compositions/" + "_".join(elements)
     else:
-        ternary_dir = cb.conf.image_directory + "compositions/" + \
+        ternary_dir = image_directory + "compositions/" + \
             "_".join(elements) + "_" + \
             quaternary[0] + "/" + quaternary[0] + str(quaternary[1])
 
     if not os.path.exists(ternary_dir):
         os.makedirs(ternary_dir)
 
-    compositions, percentages, all_features, GFA_predictions, realData, step = generate_ternary_compositions(
+    alloys, percentages, all_features, GFA_predictions, realData, step = generate_ternary_alloys(
         elements, model, originalData, quaternary=quaternary, y_features=y_features)
+
+    targets = cb.models.get_model_prediction_features(model)
 
     for feature in all_features.columns:
 
@@ -240,7 +256,7 @@ def plot_ternary(
                 continue
 
         save_path = ""
-        if feature in cb.conf.target_names:
+        if feature in [t['name'] for t in targets]:
             save_path += ternary_dir + "/predictions/" + feature
             if not os.path.exists(ternary_dir + '/predictions'):
                 os.makedirs(ternary_dir + '/predictions')
@@ -257,30 +273,30 @@ def plot_ternary(
 
         if feature == 'GFA':
 
-            mg.plots.ternary_heatmap(compositions, [p[0] for p in GFA_predictions],
+            mg.plots.ternary_heatmap(alloys, [p[0] for p in GFA_predictions],
                                      step, save_path=save_path+'_crystal',
                                      label="Crystal probability (%)",
-                                     title=title, quaternary=quaternary, vmin=0, vmax=1)
+                                     title=title, vmin=0, vmax=1)
 
-            mg.plots.ternary_heatmap(compositions, [p[1] for p in GFA_predictions],
+            mg.plots.ternary_heatmap(alloys, [p[1] for p in GFA_predictions],
                                      step, save_path=save_path+'_GR',
                                      label="GR probability (%)",
-                                     title=title, quaternary=quaternary, vmin=0, vmax=1)
+                                     title=title, vmin=0, vmax=1)
 
-            mg.plots.ternary_heatmap(compositions, [p[2] for p in GFA_predictions],
+            mg.plots.ternary_heatmap(alloys, [p[2] for p in GFA_predictions],
                                      step, save_path=save_path+'_BMG',
                                      label="BMG probability (%)",
-                                     title=title, quaternary=quaternary, vmin=0, vmax=1)
+                                     title=title, vmin=0, vmax=1)
 
-            mg.plots.ternary_heatmap(compositions, [p[1]+p[2] for p in GFA_predictions],
+            mg.plots.ternary_heatmap(alloys, [p[1]+p[2] for p in GFA_predictions],
                                      step, save_path=save_path+'_glass',
                                      label="Glass probability (%)",
-                                     title=title, quaternary=quaternary, vmin=0, vmax=1)
+                                     title=title, vmin=0, vmax=1)
 
-            mg.plots.ternary_heatmap(compositions, [np.argmax(p) for p in GFA_predictions],
+            mg.plots.ternary_heatmap(alloys, [np.argmax(p) for p in GFA_predictions],
                                      step, save_path=save_path+'_argmax',
                                      label="Predicted class",
-                                     title=title, quaternary=quaternary, vmin=0, vmax=2)
+                                     title=title, vmin=0, vmax=2)
 
         else:
 
@@ -288,9 +304,9 @@ def plot_ternary(
             if feature in cb.features.units:
                 label += " ("+cb.features.units[feature]+")"
 
-            mg.plots.ternary_heatmap(compositions, all_features[feature],
+            mg.plots.ternary_heatmap(alloys, all_features[feature],
                                      step, save_path=save_path, label=label,
-                                     title=title, quaternary=quaternary)
+                                     title=title)
 
 
 def ternary_scatter(data, tax):
@@ -318,70 +334,83 @@ def ternary_scatter(data, tax):
             tax.legend(loc="upper right", handletextpad=0.1, frameon=False)
 
 
-def generate_ternary_compositions(
+def generate_ternary_alloys(
         elements, model, originalData, quaternary=None, minPercent=0, maxPercent=1, step=None, y_features=[]):
     if step is None:
         step = 0.02 * (maxPercent - minPercent)
 
     realData = []
-    for _, row in originalData.iterrows():
-        parsedComposition = mg.alloy.parse_composition(row['composition'])
-        if quaternary is not None:
-            if quaternary[1] > 0:
-                if quaternary[0] not in parsedComposition:
-                    continue
-                elif parsedComposition[quaternary[0]] != quaternary[1]:
-                    continue
+    if originalData is not None:
+        for _, row in originalData.iterrows():
+            parsedComposition = mg.alloy.parse_composition(row['composition'])
+            if quaternary is not None:
+                if quaternary[1] > 0:
+                    if quaternary[0] not in parsedComposition:
+                        continue
+                    elif parsedComposition[quaternary[0]] != quaternary[1]:
+                        continue
 
-        if set(elements).issuperset(set(parsedComposition.keys())):
+            if set(elements).issuperset(set(parsedComposition.keys())):
 
-            tmpComposition = []
-            for e in elements:
-                if e in parsedComposition:
-                    tmpComposition.append(100*(parsedComposition[e] / step))
-                else:
-                    tmpComposition.append(0)
+                tmpComposition = []
+                for e in elements:
+                    if e in parsedComposition:
+                        tmpComposition.append(
+                            100*(parsedComposition[e] / step))
+                    else:
+                        tmpComposition.append(0)
 
-            row['percentages'] = tuple(tmpComposition)
-            realData.append(row)
+                row['percentages'] = tuple(tmpComposition)
+
+                realData.append(row)
     realData = pd.DataFrame(realData)
 
-    compositions, percentages = mg.ternary.generate_alloys(
+    alloys, percentages = mg.generate.ternary(
         elements, step*100, minPercent*100, maxPercent*100, quaternary)
 
-    all_features = pd.DataFrame(compositions, columns=['composition'])
+    all_features = pd.DataFrame(alloys, columns=['composition'])
     all_features = cb.features.calculate_features(all_features,
                                                   dropCorrelatedFeatures=False,
                                                   plot=False,
+                                                  model=model,
                                                   additionalFeatures=y_features)
     all_features = all_features.drop('composition', axis='columns')
     all_features = all_features.fillna(cb.features.maskValue)
 
-    for feature in cb.conf.targets:
-        all_features[feature.name] = cb.features.maskValue
+    targets = cb.models.get_model_prediction_features(model)
+
+    for feature in targets:
+        all_features[feature['name']] = cb.features.maskValue
     all_features['GFA'] = all_features['GFA'].astype('int64')
     GFA_predictions = []
 
     prediction_ds = cb.features.df_to_dataset(all_features)
     predictions = model.predict(prediction_ds)
-    for i in range(len(cb.conf.targets)):
-        if cb.conf.targets[i].name == 'GFA':
+    for i in range(len(targets)):
+        if targets[i]['name'] == 'GFA':
             GFA_predictions = predictions[i]
         else:
-            all_features[cb.conf.targets[i].name] = predictions[i].flatten()
+            all_features[targets[i]['name']] = predictions[i].flatten()
 
     if quaternary is not None:
-        compositions, percentages = mg.ternary.generate_alloys(
+        alloys, percentages = mg.generate.ternary(
             elements, step*100, minPercent*100, maxPercent*100)
 
-    return compositions, percentages, all_features, GFA_predictions, realData, step
+    return alloys, percentages, all_features, GFA_predictions, realData, step
 
 
-def plot_quaternary(elements, model, onlyPredictions=False, originalData=None, y_features=[]):
-    if not os.path.exists(cb.conf.image_directory + "compositions"):
-        os.makedirs(cb.conf.image_directory + "compositions")
+def plot_quaternary(
+        elements,
+        model,
+        onlyPredictions=False,
+        originalData=None,
+        y_features=[],
+        image_directory=get_image_directory()):
 
-    quaternary_dir = cb.conf.image_directory + "compositions/" + \
+    if not os.path.exists(image_directory + "compositions"):
+        os.makedirs(image_directory + "compositions")
+
+    quaternary_dir = image_directory + "compositions/" + \
         "_".join(elements)
 
     if not os.path.exists(quaternary_dir):
@@ -395,12 +424,15 @@ def plot_quaternary(elements, model, onlyPredictions=False, originalData=None, y
                               for percentage in np.arange(minPercent, maxPercent, step)]
 
     heatmaps = {}
-    compositions, percentages, all_features, GFA_predictions, realData, step = generate_ternary_compositions(
+    alloys, percentages, all_features, GFA_predictions, realData, step = generate_ternary_alloys(
         elements[:3], model, originalData, quaternary=[elements[3], quaternary_percentages[0]], y_features=y_features)
+
+    targets = cb.models.get_model_prediction_features(model)
+
     for feature in all_features.columns:
         trueFeatureName = feature.split(
             '_linearmix')[0].split('_discrepancy')[0]
-        if onlyPredictions and feature not in cb.conf.target_names and trueFeatureName not in y_features:
+        if onlyPredictions and feature not in [t['name'] for t in targets] and trueFeatureName not in y_features:
             continue
         if feature not in heatmaps:
             if feature != 'GFA':
@@ -413,13 +445,13 @@ def plot_quaternary(elements, model, onlyPredictions=False, originalData=None, y
                 heatmaps['GFA_argmax'] = []
 
     realDatas = {}
-    quaternary_compositions = []
+    quaternary_alloys = []
     for percentage in quaternary_percentages:
-        compositions, percentages, all_features, GFA_predictions, realData, step = generate_ternary_compositions(
+        alloys, percentages, all_features, GFA_predictions, realData, step = generate_ternary_alloys(
             elements[:3], model, originalData, quaternary=[elements[3], percentage], y_features=y_features)
 
         realDatas[percentage] = realData
-        quaternary_compositions.append(compositions)
+        quaternary_alloys.append(alloys)
 
         doneGFA = False
         for feature in heatmaps:
@@ -476,14 +508,14 @@ def plot_quaternary(elements, model, onlyPredictions=False, originalData=None, y
                 tmpFeature = "GFA"
 
         for i in range(len(quaternary_percentages)):
-            ternary_dir = cb.conf.image_directory + "compositions/" + \
+            ternary_dir = image_directory + "compositions/" + \
                 "_".join(elements) + "/" + \
                 elements[3] + str(quaternary_percentages[i])
             if not os.path.exists(ternary_dir):
                 os.makedirs(ternary_dir)
 
             save_path = ""
-            if feature in cb.conf.target_names:
+            if feature in [t['name'] for t in targets]:
                 save_path += ternary_dir + "/predictions/" + feature
                 if not os.path.exists(ternary_dir + '/predictions'):
                     os.makedirs(ternary_dir + '/predictions')
@@ -507,7 +539,7 @@ def plot_quaternary(elements, model, onlyPredictions=False, originalData=None, y
                         'marker': markers[c]
                     })
 
-            mg.plots.ternary_heatmap(quaternary_compositions[i], heatmaps[feature][i],
+            mg.plots.ternary_heatmap(quaternary_alloys[i], heatmaps[feature][i],
                                      step, save_path=save_path,
                                      scatter_data=scatter_data, title=title,
                                      label=label, vmax=vmax, vmin=vmin)
@@ -553,7 +585,7 @@ def plot_quaternary(elements, model, onlyPredictions=False, originalData=None, y
                 round(100 - quaternary_percentages[i], 2)) + "}$" + elements[-1] + "$_{" + str(
                     round(quaternary_percentages[i], 2)) + "}$"
 
-            mg.plots.ternary_heatmap(quaternary_compositions[i], heatmaps[feature][i],
+            mg.plots.ternary_heatmap(quaternary_alloys[i], heatmaps[feature][i],
                                      step, ax=ax, vmin=vmin, vmax=vmax,
                                      scatter_data=scatter_data, title=title,
                                      label=label, showColorbar=False)
@@ -570,7 +602,7 @@ def plot_quaternary(elements, model, onlyPredictions=False, originalData=None, y
             cax=cax)
         colorbar.set_label(label, labelpad=20, rotation=270)
 
-        if feature in cb.conf.target_names or "GFA_" in feature:
+        if feature in [t['name'] for t in targets] or "GFA_" in feature:
             if not os.path.exists(quaternary_dir + '/predictions'):
                 os.makedirs(quaternary_dir + '/predictions')
 
